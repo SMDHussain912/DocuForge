@@ -244,17 +244,25 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._section_heading(
             "Templates",
-            "Register reusable ODT and DOCX template files. Template parsing and placeholder mapping will be implemented in the template-engine milestone.",
+            "Create and edit native DocuForge templates, or register existing DOCX/ODT files for future import support.",
         ))
         self.template_list = QListWidget()
         self.template_list.setObjectName("FileList")
+        self.template_list.itemDoubleClicked.connect(lambda _item: self._open_selected_template())
         layout.addWidget(self.template_list, 1)
         actions = QHBoxLayout()
-        add_button = QPushButton("Add template")
+        new_button = QPushButton("Create template")
+        new_button.setObjectName("PrimaryButton")
+        new_button.clicked.connect(self._create_template)
+        edit_button = QPushButton("Edit selected")
+        edit_button.clicked.connect(self._open_selected_template)
+        add_button = QPushButton("Register template")
         add_button.setObjectName("PrimaryButton")
         add_button.clicked.connect(self._add_template)
         remove_button = QPushButton("Remove selected")
         remove_button.clicked.connect(lambda: self._remove_selected(self.template_list, "templates"))
+        actions.addWidget(new_button)
+        actions.addWidget(edit_button)
         actions.addWidget(add_button)
         actions.addWidget(remove_button)
         actions.addStretch()
@@ -450,12 +458,31 @@ class MainWindow(QMainWindow):
         )
         self._register_files(paths, self.source_list, "sources")
 
+    def _create_template(self) -> None:
+        self.navigate("Template Designer")
+        self.template_designer.new_template()
+
+    def _open_selected_template(self) -> None:
+        item = self.template_list.currentItem()
+        if item is None:
+            QMessageBox.information(self, "Select a template", "Choose a registered template first.")
+            return
+        path = Path(str(item.data(Qt.ItemDataRole.UserRole)))
+        if path.suffix.lower() != ".dfgtpl":
+            QMessageBox.information(
+                self, "Import not available",
+                "Direct editing is currently supported for native .dfgtpl files. DOCX/ODT import is a later milestone.",
+            )
+            return
+        self.navigate("Template Designer")
+        self.template_designer.open_template_path(path)
+
     def _add_template(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(
             self,
             "Add document template",
             str(Path.home()),
-            "Document templates (*.odt *.docx);;All files (*)",
+            "Templates (*.dfgtpl *.docx *.odt);;DocuForge templates (*.dfgtpl);;Office documents (*.docx *.odt);;All files (*)",
         )
         self._register_files(paths, self.template_list, "templates")
 
