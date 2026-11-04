@@ -6,7 +6,18 @@ DocuForge connects structured data sources to reusable document templates, gener
 
 ## Current status
 
-Phase 0 — Foundation. This repository contains the initial Python package, a PySide6 application shell, configuration and logging utilities, a data-source adapter contract, filename utilities, and starter tests. A production merge/export pipeline is not implemented yet.
+The desktop workspace includes a Word-style rich-text document editor with ribbon tabs, page layout controls, formatting, tables, images, hyperlinks, and data-field preview. Batch generation and production export are still under development.
+
+## Current editor capabilities
+
+- Ribbon tabs: Home, Insert, Layout, and Design.
+- Rich-text editing with font family/size, bold, italic, underline, and alignment.
+- Insert tables, pictures, hyperlinks, dates, page separators, and header/footer markers.
+- A4 page workspace with portrait/landscape and margin presets.
+- Connect XLSX/XLSM/CSV data and insert mapped fields with a live sample preview.
+- Save and reopen native `.dfgtpl` templates.
+
+The editor currently uses Qt rich-text as its editing surface. A dedicated pagination/rendering engine and DOCX/ODT import/export remain future work.
 
 ## Planned capabilities
 

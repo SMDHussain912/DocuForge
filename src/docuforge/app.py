@@ -115,7 +115,7 @@ class MainWindow(QMainWindow):
         side_layout.addSpacing(24)
 
         self.nav_buttons: dict[str, QPushButton] = {}
-        for name in ("Dashboard", "Data Sources", "Templates", "Template Designer", "Generate", "History", "Settings"):
+        for name in ("Dashboard", "Data Sources", "Templates", "Document Editor", "Generate", "History", "Settings"):
             button = QPushButton(name)
             button.setObjectName("NavButton")
             button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -159,7 +159,7 @@ class MainWindow(QMainWindow):
             self.preferences.string_list("registry/sources")
         )
         self.pages.addWidget(self.template_designer)
-        self.page_index["Template Designer"] = 3
+        self.page_index["Document Editor"] = 3
         self.pages.addWidget(self._generate_page())
         self.page_index["Generate"] = 4
         self.pages.addWidget(self._history_page())
@@ -364,7 +364,7 @@ class MainWindow(QMainWindow):
             "Dashboard": "Your document generation workspace.",
             "Data Sources": "Manage the files that provide your document data.",
             "Templates": "Manage reusable document layouts.",
-            "Template Designer": "Design document layouts and insert spreadsheet fields.",
+            "Document Editor": "Create and format documents with data fields.",
             "Generate": "Prepare and run document-generation batches.",
             "History": "Review previous generation activity.",
             "Settings": "Personalize your DocuForge workspace.",
@@ -459,7 +459,7 @@ class MainWindow(QMainWindow):
         self._register_files(paths, self.source_list, "sources")
 
     def _create_template(self) -> None:
-        self.navigate("Template Designer")
+        self.navigate("Document Editor")
         self.template_designer.new_template()
 
     def _open_selected_template(self) -> None:
@@ -507,6 +507,8 @@ class MainWindow(QMainWindow):
             current.remove(path)
         self.preferences.set(f"registry/{key}", current)
         self._refresh_file_list(widget, current)
+        if key == "sources" and hasattr(self, "template_designer"):
+            self.template_designer.update_registered_sources(current)
 
     def _refresh_file_list(self, widget: QListWidget, paths: list[str]) -> None:
         widget.clear()

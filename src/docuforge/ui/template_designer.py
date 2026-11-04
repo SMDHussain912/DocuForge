@@ -9,11 +9,12 @@ from typing import Any
 from uuid import uuid4
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction, QColor, QFont, QTextCharFormat
+from PySide6.QtCore import QSizeF
+from PySide6.QtGui import QAction, QColor, QFont, QTextCharFormat, QTextImageFormat
 from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QFontComboBox, QHBoxLayout, QLabel, QListWidget,
     QMessageBox, QPushButton, QSplitter, QTextBrowser, QTextEdit, QToolBar,
-    QVBoxLayout, QWidget,
+    QVBoxLayout, QWidget, QTabWidget, QScrollArea, QInputDialog,
 )
 
 from docuforge.templates.spreadsheet import list_sheets, read_columns_and_sample
@@ -79,19 +80,35 @@ class TemplateDesigner(QWidget):
         center = QWidget()
         center_layout = QVBoxLayout(center)
         center_layout.setContentsMargins(0, 0, 0, 0)
-        center_layout.addWidget(QLabel("DOCUMENT DESIGNER"))
-        self.toolbar = QToolBar()
+        center_layout.addWidget(QLabel("DOCUMENT EDITOR"))
+        self.ribbon = QTabWidget()
+        self.ribbon.setDocumentMode(True)
+        self.toolbar = QToolBar("Home")
         self.toolbar.setMovable(False)
         self._build_toolbar()
-        center_layout.addWidget(self.toolbar)
+        self.ribbon.addTab(self.toolbar, "Home")
+        self._build_insert_ribbon()
+        self._build_layout_ribbon()
+        self._build_design_ribbon()
         self.editor = QTextEdit()
         self.editor.setAcceptRichText(True)
+        self.editor.setObjectName("DocumentCanvas")
+        self.editor.setFixedWidth(794)
+        self.editor.setMinimumHeight(1123)
+        self.editor.document().setPageSize(QSizeF(794, 1123))
+        self.editor.document().setDocumentMargin(72)
         self.editor.setPlaceholderText(
             "Start designing your document here…\n\n"
             "Write anything, position the cursor wherever a value belongs, "
             "then insert a field from the Data Fields panel."
         )
-        center_layout.addWidget(self.editor, 1)
+        page_scroll = QScrollArea()
+        page_scroll.setWidgetResizable(True)
+        page_scroll.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        page_scroll.setObjectName("PageScroll")
+        page_scroll.setWidget(self.editor)
+        center_layout.addWidget(self.ribbon)
+        center_layout.addWidget(page_scroll, 1)
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
@@ -109,6 +126,13 @@ class TemplateDesigner(QWidget):
         splitter.addWidget(right)
         splitter.setSizes([220, 600, 340])
         root.addWidget(splitter, 1)
+        self.word_count = QLabel("0 words")
+        self.page_count = QLabel("1 page")
+        stats = QHBoxLayout()
+        stats.addWidget(self.word_count)
+        stats.addStretch()
+        stats.addWidget(self.page_count)
+        root.addLayout(stats)
 
         bottom = QHBoxLayout()
         new_button = QPushButton("New template")
@@ -127,6 +151,8 @@ class TemplateDesigner(QWidget):
         bottom.addWidget(save_button)
         root.addLayout(bottom)
         self.editor.textChanged.connect(self._refresh_preview)
+        self.editor.textChanged.connect(self._update_document_stats)
+        self.setStyleSheet("#PageScroll { background:#DDE2EA; } #DocumentCanvas { background:white; color:#20242B; border:1px solid #C9CDD4; padding:0; }")
 
     def _build_toolbar(self) -> None:
         for label, kind in (("B", "bold"), ("I", "italic"), ("U", "underline")):
@@ -155,6 +181,114 @@ class TemplateDesigner(QWidget):
                 lambda checked=False, value=alignment: self.editor.setAlignment(value)
             )
             self.toolbar.addAction(action)
+
+
+    def _add_ribbon_tab(self, name: str, actions: list[tuple[str, object]]) -> None:
+        bar = QToolBar(name)
+        bar.setMovable(False)
+        self.ribbon.addTab(bar, name)
+        for label, callback in actions:
+            action = QAction(label, self)
+            action.triggered.connect(callback)
+            bar.addAction(action)
+
+    def _build_insert_ribbon(self) -> None:
+        self._add_ribbon_tab("Insert", [
+            ("Table", self._insert_table), ("Picture", self._insert_picture),
+            ("Hyperlink", self._insert_hyperlink), ("Date", self._insert_date),
+            ("Page break", self._insert_page_break),
+            ("Header marker", lambda: self._insert_marker("HEADER")),
+            ("Footer marker", lambda: self._insert_marker("FOOTER")),
+        ])
+
+    def _build_layout_ribbon(self) -> None:
+        self._add_ribbon_tab("Layout", [
+            ("A4 portrait", lambda: self._set_page_layout(False)),
+            ("A4 landscape", lambda: self._set_page_layout(True)),
+            ("Normal margins", lambda: self.editor.document().setDocumentMargin(72)),
+            ("Narrow margins", lambda: self.editor.document().setDocumentMargin(36)),
+            ("Wide margins", lambda: self.editor.document().setDocumentMargin(90)),
+        ])
+
+    def _build_design_ribbon(self) -> None:
+        self._add_ribbon_tab("Design", [
+            ("Title", lambda: self._apply_heading(24)),
+            ("Heading 1", lambda: self._apply_heading(18)),
+            ("Heading 2", lambda: self._apply_heading(14)),
+            ("Normal", lambda: self._apply_heading(11, False)),
+            ("Clear formatting", self._clear_formatting),
+        ])
+
+    def _update_document_stats(self) -> None:
+        words = len(re.findall(r"\\b[\\w'-]+\\b", self.editor.toPlainText()))
+        self.word_count.setText(f"{words} words")
+        self.page_count.setText(f"{max(1, self.editor.document().pageCount())} pages")
+
+    def _insert_table(self) -> None:
+        rows, ok = QInputDialog.getInt(self, "Insert table", "Rows", 3, 1, 50)
+        if not ok: return
+        cols, ok = QInputDialog.getInt(self, "Insert table", "Columns", 3, 1, 20)
+        if ok: self.editor.textCursor().insertTable(rows, cols)
+
+    def _insert_picture(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Insert picture", str(Path.home()), "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp)")
+        if path:
+            image = QTextImageFormat()
+            image.setName(path)
+            image.setWidth(320)
+            self.editor.textCursor().insertImage(image)
+
+    def _insert_hyperlink(self) -> None:
+        url, ok = QInputDialog.getText(self, "Insert hyperlink", "URL")
+        if ok and url.strip():
+            fmt = QTextCharFormat()
+            fmt.setAnchor(True)
+            fmt.setAnchorHref(url.strip())
+            fmt.setForeground(QColor("#1769AA"))
+            fmt.setFontUnderline(True)
+            label, accepted = QInputDialog.getText(self, "Link text", "Display text", text=url.strip())
+            if accepted: self.editor.textCursor().insertText(label or url.strip(), fmt)
+
+    def _insert_date(self) -> None:
+        from datetime import date
+        self.editor.textCursor().insertText(date.today().strftime("%d %B %Y"))
+
+    def _insert_page_break(self) -> None:
+        cursor = self.editor.textCursor()
+        cursor.insertBlock()
+        cursor.insertHtml("<hr>")
+        cursor.insertBlock()
+
+    def _insert_marker(self, label: str) -> None:
+        fmt = QTextCharFormat()
+        fmt.setFontWeight(QFont.Weight.Bold)
+        fmt.setForeground(QColor("#64748B"))
+        cursor = self.editor.textCursor()
+        cursor.insertText(f"[{label}]", fmt)
+        cursor.insertBlock()
+
+    def _set_page_layout(self, landscape: bool) -> None:
+        width, height = (1123, 794) if landscape else (794, 1123)
+        self.editor.document().setPageSize(QSizeF(width, height))
+        self.editor.setFixedWidth(width)
+        self.editor.setMinimumHeight(height)
+
+    def _apply_heading(self, size: int, bold: bool = True) -> None:
+        fmt = self.editor.currentCharFormat()
+        fmt.setFontPointSize(size)
+        fmt.setFontWeight(QFont.Weight.Bold if bold else QFont.Weight.Normal)
+        self.editor.mergeCurrentCharFormat(fmt)
+        self.editor.setFocus()
+
+    def _clear_formatting(self) -> None:
+        fmt = QTextCharFormat()
+        fmt.setFontFamily("Arial")
+        fmt.setFontPointSize(11)
+        fmt.setFontWeight(QFont.Weight.Normal)
+        fmt.setFontItalic(False)
+        fmt.setFontUnderline(False)
+        fmt.setForeground(QColor("#20242B"))
+        self.editor.mergeCurrentCharFormat(fmt)
 
     def _toggle_format(self, kind: str, enabled: bool) -> None:
         cursor = self.editor.textCursor()
