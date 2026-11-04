@@ -11,7 +11,7 @@ from uuid import uuid4
 from PySide6.QtCore import Qt, Signal, QMimeData
 from PySide6.QtCore import QSizeF
 from PySide6.QtGui import QImageReader, QTextTableFormat, QTextLength
-from PySide6.QtGui import QAction, QColor, QFont, QTextCharFormat, QTextImageFormat, QDrag
+from PySide6.QtGui import QAction, QColor, QFont, QTextCharFormat, QTextImageFormat, QTextCursor, QDrag
 from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QFontComboBox, QHBoxLayout, QLabel, QListWidget,
     QMessageBox, QPushButton, QSplitter, QTextBrowser, QTextEdit, QToolBar,
@@ -331,7 +331,7 @@ class TemplateDesigner(QWidget):
             return cursor, QTextImageFormat(fmt)
         probe = self.editor.textCursor()
         if probe.position() > 0:
-            probe.movePosition(probe.MoveOperation.PreviousCharacter)
+            probe.movePosition(QTextCursor.MoveOperation.PreviousCharacter)
             fmt = probe.charFormat()
             if fmt.isImageFormat():
                 return probe, QTextImageFormat(fmt)
@@ -351,7 +351,7 @@ class TemplateDesigner(QWidget):
         if cursor is None:
             self.status_message.emit("Place the cursor on an image first.")
             return
-        cursor.movePosition(cursor.MoveOperation.NextCharacter, cursor.MoveMode.KeepAnchor)
+        cursor.movePosition(QTextCursor.MoveOperation.NextCharacter, QTextCursor.MoveMode.KeepAnchor)
         cursor.insertImage(image)
         self.editor.setTextCursor(cursor)
         self.editor.setFocus()
