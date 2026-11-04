@@ -90,6 +90,8 @@ class TemplateDesigner(QWidget):
         self._build_insert_ribbon()
         self._build_layout_ribbon()
         self._build_design_ribbon()
+        self._build_data_ribbon()
+        self._build_view_ribbon()
         self.editor = QTextEdit()
         self.editor.setAcceptRichText(True)
         self.editor.setObjectName("DocumentCanvas")
@@ -217,6 +219,19 @@ class TemplateDesigner(QWidget):
             ("Heading 2", lambda: self._apply_heading(14)),
             ("Normal", lambda: self._apply_heading(11, False)),
             ("Clear formatting", self._clear_formatting),
+        ])
+
+    def _build_data_ribbon(self) -> None:
+        self._add_ribbon_tab("Data", [
+            ("Insert data field", self._insert_selected_field),
+            ("Refresh source fields", self._load_selected_source),
+            ("Refresh preview", self._refresh_preview),
+        ])
+
+    def _build_view_ribbon(self) -> None:
+        self._add_ribbon_tab("View", [
+            ("Toggle data fields", lambda: self.data_panel.setVisible(not self.data_panel.isVisible())),
+            ("Toggle preview", lambda: self.preview_panel.setVisible(not self.preview_panel.isVisible())),
         ])
 
     def _update_document_stats(self) -> None:
