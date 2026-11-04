@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from PySide6.QtCore import Qt, Signal, QMimeData
 from PySide6.QtCore import QSizeF
+from PySide6.QtGui import QImageReader, QTextTableFormat, QTextLength
 from PySide6.QtGui import QAction, QColor, QFont, QTextCharFormat, QTextImageFormat, QDrag
 from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QFontComboBox, QHBoxLayout, QLabel, QListWidget,
@@ -313,17 +314,47 @@ class TemplateDesigner(QWidget):
         self._add_ribbon_tab("Picture", [
             ("Insert picture", self._insert_picture),
             ("Replace picture", self._replace_picture),
-            ("Resize picture", self._resize_picture),
-            ("Reset size", self._reset_picture_size),
+            ("Resize proportionally", self._resize_picture),
+            ("Original size", self._reset_picture_size),
+            ("Alt text", self._set_picture_alt_text),
             ("Align left", lambda: self._align_picture(Qt.AlignmentFlag.AlignLeft)),
             ("Align center", lambda: self._align_picture(Qt.AlignmentFlag.AlignHCenter)),
             ("Align right", lambda: self._align_picture(Qt.AlignmentFlag.AlignRight)),
             ("Remove picture", self._remove_picture),
         ])
 
+    def _image_cursor_and_format(self):
+        """Find an inline image at or immediately before the insertion cursor."""
+        cursor = self.editor.textCursor()
+        fmt = cursor.charFormat()
+        if fmt.isImageFormat():
+            return cursor, QTextImageFormat(fmt)
+        probe = self.editor.textCursor()
+        if probe.position() > 0:
+            probe.movePosition(probe.MoveOperation.PreviousCharacter)
+            fmt = probe.charFormat()
+            if fmt.isImageFormat():
+                return probe, QTextImageFormat(fmt)
+        if cursor.hasSelection():
+            probe = self.editor.textCursor()
+            probe.setPosition(cursor.selectionStart())
+            fmt = probe.charFormat()
+            if fmt.isImageFormat():
+                return probe, QTextImageFormat(fmt)
+        return None, None
+
     def _selected_image_format(self):
-        fmt = self.editor.textCursor().charFormat()
-        return fmt if fmt.isImageFormat() else None
+        return self._image_cursor_and_format()[1]
+
+    def _replace_selected_image(self, image: QTextImageFormat) -> None:
+        cursor, _ = self._image_cursor_and_format()
+        if cursor is None:
+            self.status_message.emit("Place the cursor on an image first.")
+            return
+        cursor.movePosition(cursor.MoveOperation.NextCharacter, cursor.MoveMode.KeepAnchor)
+        cursor.insertImage(image)
+        self.editor.setTextCursor(cursor)
+        self.editor.setFocus()
 
     def _insert_image_path(self, path: str) -> None:
         image_path = Path(path)
@@ -332,7 +363,13 @@ class TemplateDesigner(QWidget):
             return
         image = QTextImageFormat()
         image.setName(str(image_path))
-        image.setWidth(320)
+        reader = QImageReader(str(image_path))
+        size = reader.size()
+        width = min(480, size.width()) if size.isValid() else 320
+        image.setWidth(width)
+        if size.isValid() and size.width() > 0:
+            image.setHeight(round(width * size.height() / size.width()))
+        image.setToolTip(image_path.name)
         self.editor.textCursor().insertImage(image)
         self.editor.setFocus()
 
@@ -345,33 +382,60 @@ class TemplateDesigner(QWidget):
         if path:
             image = QTextImageFormat(old)
             image.setName(path)
-            self.editor.textCursor().insertImage(image)
+            reader = QImageReader(path)
+            size = reader.size()
+            if size.isValid():
+                width = old.width() or min(480, size.width())
+                image.setWidth(width)
+                image.setHeight(round(width * size.height() / max(1, size.width())))
+            image.setToolTip(Path(path).name)
+            self._replace_selected_image(image)
 
     def _resize_picture(self) -> None:
-        old = self._selected_image_format()
+        cursor, old = self._image_cursor_and_format()
         if old is None:
-            self.status_message.emit("Select an image in the document first.")
+            self.status_message.emit("Place the cursor on an image first.")
             return
-        width, ok = QInputDialog.getDouble(self, "Resize picture", "Width (pixels)", old.width() or 320, 16, 3000, 0)
-        if not ok:
-            return
-        height, ok = QInputDialog.getDouble(self, "Resize picture", "Height (pixels)", old.height() or width, 16, 3000, 0)
+        current_width = old.width() or 320
+        current_height = old.height() or current_width
+        ratio = current_height / max(1, current_width)
+        width, ok = QInputDialog.getDouble(
+            self, "Resize picture", "New width (pixels)", current_width, 16, 3000, 0
+        )
         if not ok:
             return
         image = QTextImageFormat(old)
         image.setWidth(width)
-        image.setHeight(height)
-        self.editor.textCursor().insertImage(image)
+        image.setHeight(round(width * ratio))
+        self._replace_selected_image(image)
 
     def _reset_picture_size(self) -> None:
-        old = self._selected_image_format()
+        cursor, old = self._image_cursor_and_format()
         if old is None:
-            self.status_message.emit("Select an image in the document first.")
+            self.status_message.emit("Place the cursor on an image first.")
             return
         image = QTextImageFormat(old)
-        image.setWidth(0)
-        image.setHeight(0)
-        self.editor.textCursor().insertImage(image)
+        reader = QImageReader(image.name())
+        size = reader.size()
+        if size.isValid():
+            image.setWidth(min(480, size.width()))
+            image.setHeight(round(min(480, size.width()) * size.height() / max(1, size.width())))
+        else:
+            image.setWidth(0)
+            image.setHeight(0)
+        self._replace_selected_image(image)
+
+    def _set_picture_alt_text(self) -> None:
+        cursor, old = self._image_cursor_and_format()
+        if old is None:
+            self.status_message.emit("Place the cursor on an image first.")
+            return
+        current = old.toolTip()
+        value, ok = QInputDialog.getText(self, "Picture description", "Alternative text", text=current)
+        if ok:
+            image = QTextImageFormat(old)
+            image.setToolTip(value.strip())
+            self._replace_selected_image(image)
 
     def _align_picture(self, alignment: Qt.AlignmentFlag) -> None:
         if self._selected_image_format() is None:
@@ -396,8 +460,14 @@ class TemplateDesigner(QWidget):
             ("Delete column", self._table_delete_column),
             ("Merge cells", self._table_merge_cells),
             ("Split cell", self._table_split_cell),
+            ("Header row", self._table_toggle_header),
+            ("Equal columns", self._table_equal_columns),
+            ("Table properties", self._table_properties),
+            ("Table alignment", self._table_alignment),
             ("Cell shading", self._table_cell_shading),
+            ("Alternating rows", self._table_alternating_rows),
             ("Table borders", self._table_borders),
+            ("Delete table", self._table_delete),
         ])
 
     def _current_table(self):
@@ -463,6 +533,82 @@ class TemplateDesigner(QWidget):
             fmt.setBackground(color)
             cell.setFormat(fmt)
 
+    def _table_toggle_header(self) -> None:
+        table = self._current_table()
+        if table is None:
+            self.status_message.emit("Place the cursor inside a table first.")
+            return
+        table.setHeaderRowCount(1 if table.format().headerRowCount() == 0 else 0)
+
+    def _table_equal_columns(self) -> None:
+        table = self._current_table()
+        if table is None:
+            self.status_message.emit("Place the cursor inside a table first.")
+            return
+        width = 100.0 / max(1, table.columns())
+        fmt = table.format()
+        fmt.setColumnWidthConstraints([QTextLength(QTextLength.Type.PercentageLength, width) for _ in range(table.columns())])
+        table.setFormat(fmt)
+
+    def _table_properties(self) -> None:
+        table = self._current_table()
+        if table is None:
+            self.status_message.emit("Place the cursor inside a table first.")
+            return
+        fmt = table.format()
+        border, ok = QInputDialog.getDouble(self, "Table properties", "Border width (pt)", fmt.border(), 0, 8, 1)
+        if not ok:
+            return
+        padding, ok = QInputDialog.getDouble(self, "Table properties", "Cell padding (px)", fmt.cellPadding(), 0, 30, 1)
+        if not ok:
+            return
+        spacing, ok = QInputDialog.getDouble(self, "Table properties", "Cell spacing (px)", fmt.cellSpacing(), 0, 20, 1)
+        if not ok:
+            return
+        fmt.setBorder(border)
+        fmt.setCellPadding(padding)
+        fmt.setCellSpacing(spacing)
+        fmt.setBorderBrush(QColor("#8993A4"))
+        table.setFormat(fmt)
+
+    def _table_alignment(self) -> None:
+        table = self._current_table()
+        if table is None:
+            self.status_message.emit("Place the cursor inside a table first.")
+            return
+        choice, ok = QInputDialog.getItem(
+            self, "Table alignment", "Align table", ["Left", "Center", "Right"], 1, False
+        )
+        if ok:
+            fmt = table.format()
+            fmt.setAlignment({
+                "Left": Qt.AlignmentFlag.AlignLeft,
+                "Center": Qt.AlignmentFlag.AlignHCenter,
+                "Right": Qt.AlignmentFlag.AlignRight,
+            }[choice])
+            table.setFormat(fmt)
+
+    def _table_alternating_rows(self) -> None:
+        table = self._current_table()
+        if table is None:
+            self.status_message.emit("Place the cursor inside a table first.")
+            return
+        from PySide6.QtGui import QTextTableCellFormat
+        for row in range(table.rows()):
+            color = QColor("#EAF1FC" if row % 2 == 0 else "#FFFFFF")
+            for column in range(table.columns()):
+                cell = table.cellAt(row, column)
+                cell_format = QTextTableCellFormat(cell.format())
+                cell_format.setBackground(color)
+                cell.setFormat(cell_format)
+
+    def _table_delete(self) -> None:
+        table = self._current_table()
+        if table is None:
+            self.status_message.emit("Place the cursor inside a table first.")
+            return
+        table.removeRows(0, table.rows())
+
     def _table_borders(self) -> None:
         table = self._current_table()
         if table is None: return
@@ -511,9 +657,23 @@ class TemplateDesigner(QWidget):
 
     def _insert_table(self) -> None:
         rows, ok = QInputDialog.getInt(self, "Insert table", "Rows", 3, 1, 50)
-        if not ok: return
+        if not ok:
+            return
         cols, ok = QInputDialog.getInt(self, "Insert table", "Columns", 3, 1, 20)
-        if ok: self.editor.textCursor().insertTable(rows, cols)
+        if not ok:
+            return
+        cursor = self.editor.textCursor()
+        table_format = QTextTableFormat()
+        table_format.setBorder(0.8)
+        table_format.setBorderBrush(QColor("#8993A4"))
+        table_format.setCellPadding(6)
+        table_format.setCellSpacing(0)
+        table_format.setHeaderRowCount(1)
+        table_format.setColumnWidthConstraints([
+            QTextLength(QTextLength.Type.PercentageLength, 100.0 / cols)
+            for _ in range(cols)
+        ])
+        cursor.insertTable(rows, cols, table_format)
 
     def _insert_picture(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Insert picture", str(Path.home()), "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp)")
