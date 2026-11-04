@@ -12,7 +12,9 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import (
+from docuforge.ui.template_designer import TemplateDesigner
+
+from PySide6.QtWidgets (
     QApplication,
     QComboBox,
     QFileDialog,
@@ -113,7 +115,7 @@ class MainWindow(QMainWindow):
         side_layout.addSpacing(24)
 
         self.nav_buttons: dict[str, QPushButton] = {}
-        for name in ("Dashboard", "Data Sources", "Templates", "Generate", "History", "Settings"):
+        for name in ("Dashboard", "Data Sources", "Templates", "Template Designer", "Generate", "History", "Settings"):
             button = QPushButton(name)
             button.setObjectName("NavButton")
             button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -153,12 +155,17 @@ class MainWindow(QMainWindow):
         self.page_index["Data Sources"] = 1
         self.pages.addWidget(self._templates_page())
         self.page_index["Templates"] = 2
+        self.template_designer = TemplateDesigner(
+            self.preferences.string_list("registry/sources")
+        )
+        self.pages.addWidget(self.template_designer)
+        self.page_index["Template Designer"] = 3
         self.pages.addWidget(self._generate_page())
-        self.page_index["Generate"] = 3
+        self.page_index["Generate"] = 4
         self.pages.addWidget(self._history_page())
-        self.page_index["History"] = 4
+        self.page_index["History"] = 5
         self.pages.addWidget(self._settings_page())
-        self.page_index["Settings"] = 5
+        self.page_index["Settings"] = 6
 
     def _section_heading(self, title: str, detail: str) -> QWidget:
         widget = QWidget()
@@ -349,6 +356,7 @@ class MainWindow(QMainWindow):
             "Dashboard": "Your document generation workspace.",
             "Data Sources": "Manage the files that provide your document data.",
             "Templates": "Manage reusable document layouts.",
+            "Template Designer": "Design document layouts and insert spreadsheet fields.",
             "Generate": "Prepare and run document-generation batches.",
             "History": "Review previous generation activity.",
             "Settings": "Personalize your DocuForge workspace.",
@@ -459,6 +467,8 @@ class MainWindow(QMainWindow):
                 current.append(path)
         self.preferences.set(f"registry/{key}", current)
         self._refresh_file_list(widget, current)
+        if key == "sources" and hasattr(self, "template_designer"):
+            self.template_designer.update_registered_sources(current)
 
     def _remove_selected(self, widget: QListWidget, key: str) -> None:
         selected = widget.currentItem()
