@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QMimeData
 from PySide6.QtCore import QSizeF
-from PySide6.QtGui import QAction, QColor, QFont, QTextCharFormat, QTextImageFormat
+from PySide6.QtGui import QAction, QColor, QFont, QTextCharFormat, QTextImageFormat, QDrag
 from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QFontComboBox, QHBoxLayout, QLabel, QListWidget,
     QMessageBox, QPushButton, QSplitter, QTextBrowser, QTextEdit, QToolBar,
@@ -21,7 +21,48 @@ from docuforge.templates.spreadsheet import list_sheets, read_columns_and_sample
 from docuforge.templates.docx_io import import_docx, export_docx
 from docuforge.templates.template_file import load_template, save_template
 
-_FIELD_TOKEN = re.compile(r"⟦DFG:([0-9a-f-]{36})⟧")
+_FIELD_TOKEN = re.compile(r"⟦DFG:([0-9a-f-]{36})⟧|«([^»]+)»")
+
+
+class FieldListWidget(QListWidget):
+    """List whose items can be dragged into the document editor."""
+    def startDrag(self, supported_actions: Qt.DropAction) -> None:
+        item = self.currentItem()
+        if item is None:
+            return
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setData("application/x-docuforge-field", item.text().encode("utf-8"))
+        mime.setText(item.text())
+        drag.setMimeData(mime)
+        drag.exec(Qt.DropAction.CopyAction)
+
+
+class DropTextEdit(QTextEdit):
+    """Rich-text editor accepting data-field drops from the field browser."""
+    fieldDropped = Signal(str)
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasFormat("application/x-docuforge-field"):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+    def dragMoveEvent(self, event) -> None:
+        if event.mimeData().hasFormat("application/x-docuforge-field"):
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+    def dropEvent(self, event) -> None:
+        if event.mimeData().hasFormat("application/x-docuforge-field"):
+            column = bytes(event.mimeData().data("application/x-docuforge-field")).decode("utf-8")
+            self.setTextCursor(self.cursorForPosition(event.position().toPoint()))
+            self.fieldDropped.emit(column)
+            event.acceptProposedAction()
+            return
+        super().dropEvent(event)
+
 
 
 class TemplateDesigner(QWidget):
@@ -68,7 +109,8 @@ class TemplateDesigner(QWidget):
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.addWidget(QLabel("DATA FIELDS"))
-        self.field_list = QListWidget()
+        self.field_list = FieldListWidget()
+        self.field_list.setDragEnabled(True)
         self.field_list.setToolTip("Double-click a field to insert it at the document cursor.")
         self.field_list.itemDoubleClicked.connect(self._insert_selected_field)
         left_layout.addWidget(self.field_list, 1)
@@ -93,7 +135,8 @@ class TemplateDesigner(QWidget):
         self._build_design_ribbon()
         self._build_data_ribbon()
         self._build_view_ribbon()
-        self.editor = QTextEdit()
+        self.editor = DropTextEdit()
+        self.editor.fieldDropped.connect(self._insert_field_by_name)
         self.editor.setAcceptRichText(True)
         self.editor.setObjectName("DocumentCanvas")
         self.editor.setFixedWidth(794)
@@ -124,6 +167,8 @@ class TemplateDesigner(QWidget):
         preview_button.clicked.connect(self._refresh_preview)
         right_layout.addWidget(preview_button)
 
+        self.data_panel = left
+        self.preview_panel = right
         splitter.addWidget(left)
         splitter.addWidget(center)
         splitter.addWidget(right)
@@ -388,13 +433,14 @@ class TemplateDesigner(QWidget):
         if item is None:
             QMessageBox.information(self, "Select a field", "Choose a field from the Data Fields panel.")
             return
+        self._insert_field_by_name(item.text())
+
+    def _insert_field_by_name(self, column: str) -> None:
         if self.current_source_path is None:
             QMessageBox.information(self, "No source", "Connect a data source before inserting fields.")
             return
-
-        column = item.text()
         field_id = str(uuid4())
-        token = f"⟦DFG:{field_id}⟧"
+        token = f"«{column}»"
         metadata = {
             "id": field_id,
             "source_id": str(self.current_source_path.resolve()),
@@ -421,9 +467,13 @@ class TemplateDesigner(QWidget):
 
         def replace(match: re.Match[str]) -> str:
             field_id = match.group(1)
-            metadata = self.fields.get(field_id)
+            if field_id:
+                metadata = self.fields.get(field_id)
+            else:
+                label = match.group(2)
+                metadata = next((entry for entry in self.fields.values() if entry.get("display_name") == label or entry.get("column_id") == label), None)
             if metadata is None:
-                return html.escape("[Missing field]")
+                return html.escape(match.group(0))
             name = metadata.get("column_id", "")
             value = self.sample_record.get(name, metadata.get("fallback", ""))
             return html.escape("" if value is None else str(value))
