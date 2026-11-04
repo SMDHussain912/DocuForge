@@ -14,7 +14,7 @@ from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QFont
 from docuforge.ui.template_designer import TemplateDesigner
 
-from PySide6.QtWidgets (
+from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QFileDialog,
