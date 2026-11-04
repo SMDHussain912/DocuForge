@@ -10,7 +10,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Protocol
 
-from docuforge.document.model import Document, Paragraph, TextRun
+from docuforge.document.model import Document, DynamicField, Paragraph, TextRun
 
 
 class EditCommand(Protocol):
@@ -47,6 +47,60 @@ class InsertText:
             paragraph.runs[-1].text += self.text
         else:
             paragraph.runs.append(TextRun(self.text))
+
+
+@dataclass(slots=True)
+class InsertInlineField:
+    """Insert a typed field at a character offset inside a paragraph."""
+
+    section_index: int
+    paragraph_index: int
+    run_index: int
+    offset: int
+    field: DynamicField
+
+    def apply(self, document: Document) -> None:
+        paragraph = document.sections[self.section_index].blocks[self.paragraph_index]
+        if not isinstance(paragraph, Paragraph):
+            raise TypeError("Fields can only be inserted into a paragraph.")
+        if not 0 <= self.run_index <= len(paragraph.runs):
+            raise IndexError("Inline insertion position is outside the paragraph.")
+        if self.run_index == len(paragraph.runs):
+            if self.offset != 0:
+                raise IndexError("Offset must be zero after the last run.")
+            paragraph.runs.append(deepcopy(self.field))
+            return
+        target = paragraph.runs[self.run_index]
+        if not isinstance(target, TextRun):
+            if self.offset != 0:
+                raise IndexError("A field node only accepts offset zero.")
+            paragraph.runs.insert(self.run_index, deepcopy(self.field))
+            return
+        if not 0 <= self.offset <= len(target.text):
+            raise IndexError("Character offset is outside the text run.")
+        before, after = deepcopy(target), deepcopy(target)
+        before.text, after.text = target.text[:self.offset], target.text[self.offset:]
+        replacement = ([before] if before.text else []) + [deepcopy(self.field)]
+        if after.text:
+            replacement.append(after)
+        paragraph.runs[self.run_index:self.run_index + 1] = replacement
+
+
+@dataclass(slots=True)
+class RemoveInlineNode:
+    """Remove an inline node from a paragraph."""
+
+    section_index: int
+    paragraph_index: int
+    run_index: int
+
+    def apply(self, document: Document) -> None:
+        paragraph = document.sections[self.section_index].blocks[self.paragraph_index]
+        if not isinstance(paragraph, Paragraph):
+            raise TypeError("Inline nodes can only be removed from a paragraph.")
+        if not 0 <= self.run_index < len(paragraph.runs):
+            raise IndexError("Inline node position is outside the paragraph.")
+        paragraph.runs.pop(self.run_index)
 
 
 class EditorSession:
