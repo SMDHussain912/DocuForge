@@ -102,7 +102,11 @@ class _HTMLToDocx(HTMLParser):
 
     def _paragraph(self):
         if self.paragraph is None:
-            self.paragraph = self.cell.add_paragraph() if self.cell is not None else self.document.add_paragraph()
+            if self.cell is not None:
+                existing = self.cell.paragraphs
+                self.paragraph = existing[0] if len(existing) == 1 and not existing[0].text and not existing[0].runs else self.cell.add_paragraph()
+            else:
+                self.paragraph = self.document.add_paragraph()
         return self.paragraph
 
     def _end_paragraph(self) -> None:
