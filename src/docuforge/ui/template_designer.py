@@ -13,7 +13,7 @@ from PySide6.QtCore import QSizeF
 from PySide6.QtGui import QImageReader, QTextTableFormat, QTextLength
 from PySide6.QtGui import QAction, QColor, QFont, QTextCharFormat, QTextImageFormat, QTextCursor, QDrag
 from PySide6.QtWidgets import (
-    QComboBox, QFileDialog, QFontComboBox, QHBoxLayout, QLabel, QListWidget,
+    QColorDialog, QComboBox, QFileDialog, QFontComboBox, QHBoxLayout, QLabel, QListWidget,
     QMessageBox, QPushButton, QSplitter, QTextBrowser, QTextEdit, QToolBar,
     QVBoxLayout, QWidget, QTabWidget, QScrollArea, QInputDialog,
 )
@@ -324,20 +324,24 @@ class TemplateDesigner(QWidget):
         ])
 
     def _image_cursor_and_format(self):
-        """Find an inline image at or immediately before the insertion cursor."""
-        cursor = self.editor.textCursor()
-        fmt = cursor.charFormat()
-        if fmt.isImageFormat():
-            return cursor, QTextImageFormat(fmt)
-        probe = self.editor.textCursor()
-        if probe.position() > 0:
-            probe.movePosition(QTextCursor.MoveOperation.PreviousCharacter)
-            fmt = probe.charFormat()
-            if fmt.isImageFormat():
-                return probe, QTextImageFormat(fmt)
-        if cursor.hasSelection():
-            probe = self.editor.textCursor()
-            probe.setPosition(cursor.selectionStart())
+        """Return a one-character selection around the inline image object.
+
+        QTextEdit exposes inline images as object-replacement characters. Reading
+        charFormat() at the insertion point alone is unreliable, so inspect the
+        character on both sides and keep the object selected for replacement.
+        """
+        current = self.editor.textCursor()
+        candidates = []
+        if current.hasSelection():
+            candidates.append(current.selectionStart())
+        candidates.extend([current.position(), current.position() - 1])
+        document_end = self.editor.document().characterCount() - 1
+        for position in candidates:
+            if position < 0 or position >= document_end:
+                continue
+            probe = QTextCursor(self.editor.document())
+            probe.setPosition(position)
+            probe.setPosition(position + 1, QTextCursor.MoveMode.KeepAnchor)
             fmt = probe.charFormat()
             if fmt.isImageFormat():
                 return probe, QTextImageFormat(fmt)
@@ -349,9 +353,8 @@ class TemplateDesigner(QWidget):
     def _replace_selected_image(self, image: QTextImageFormat) -> None:
         cursor, _ = self._image_cursor_and_format()
         if cursor is None:
-            self.status_message.emit("Place the cursor on an image first.")
+            self.status_message.emit("Click the image once, then use the Picture tab.")
             return
-        cursor.movePosition(QTextCursor.MoveOperation.NextCharacter, QTextCursor.MoveMode.KeepAnchor)
         cursor.insertImage(image)
         self.editor.setTextCursor(cursor)
         self.editor.setFocus()
@@ -465,6 +468,7 @@ class TemplateDesigner(QWidget):
             ("Table properties", self._table_properties),
             ("Table alignment", self._table_alignment),
             ("Cell shading", self._table_cell_shading),
+            ("Cell borders…", self._table_cell_borders),
             ("Alternating rows", self._table_alternating_rows),
             ("Table borders", self._table_borders),
             ("Delete table", self._table_delete),
@@ -507,10 +511,16 @@ class TemplateDesigner(QWidget):
             return
         first = table.cellAt(cursor.selectionStart())
         last = table.cellAt(max(cursor.selectionStart(), cursor.selectionEnd() - 1))
-        if first.isValid() and last.isValid():
-            top, left = min(first.row(), last.row()), min(first.column(), last.column())
-            bottom, right = max(first.row(), last.row()), max(first.column(), last.column())
-            table.mergeCells(top, left, bottom - top + 1, right - left + 1)
+        if not first.isValid() or not last.isValid():
+            self.status_message.emit("Select a range spanning adjacent cells in one table.")
+            return
+        top, left = min(first.row(), last.row()), min(first.column(), last.column())
+        bottom, right = max(first.row(), last.row()), max(first.column(), last.column())
+        if top == bottom and left == right:
+            self.status_message.emit("Your selection covers only one cell. Select two or more cells.")
+            return
+        table.mergeCells(top, left, bottom - top + 1, right - left + 1)
+        self.status_message.emit("Selected table cells merged.")
 
     def _table_split_cell(self) -> None:
         table = self._current_table()
@@ -532,6 +542,56 @@ class TemplateDesigner(QWidget):
             fmt = cell.format()
             fmt.setBackground(color)
             cell.setFormat(fmt)
+
+    def _table_cell_borders(self) -> None:
+        """Edit borders on the current cell or all cells covered by the selection."""
+        table = self._current_table()
+        if table is None:
+            self.status_message.emit("Place the cursor inside a table first.")
+            return
+        side, ok = QInputDialog.getItem(
+            self, "Cell borders", "Apply to",
+            ["All sides", "Top", "Bottom", "Left", "Right", "No borders"], 0, False
+        )
+        if not ok:
+            return
+        width, ok = QInputDialog.getDouble(
+            self, "Cell borders", "Border width (pt)", 0.8, 0, 8, 1
+        )
+        if not ok:
+            return
+        color = QColorDialog.getColor(QColor("#8993A4"), self, "Border color")
+        if not color.isValid():
+            return
+        cursor = self.editor.textCursor()
+        selected_start = cursor.selectionStart() if cursor.hasSelection() else cursor.position()
+        selected_end = cursor.selectionEnd() if cursor.hasSelection() else cursor.position()
+        cells = []
+        for row in range(table.rows()):
+            for column in range(table.columns()):
+                cell = table.cellAt(row, column)
+                cell_cursor = cell.firstCursorPosition()
+                cell_start = cell_cursor.position()
+                cell_end = cell.lastCursorPosition().position()
+                if not cursor.hasSelection() or (cell_start <= selected_end and cell_end >= selected_start):
+                    cells.append(cell)
+        if not cells:
+            cells = [table.cellAt(cursor)]
+        sides = {
+            "Top": ("Top",), "Bottom": ("Bottom",),
+            "Left": ("Left",), "Right": ("Right",),
+            "All sides": ("Top", "Bottom", "Left", "Right"),
+            "No borders": ("Top", "Bottom", "Left", "Right"),
+        }[side]
+        for cell in cells:
+            cell_format = cell.format().toTableCellFormat()
+            for edge in sides:
+                setter = getattr(cell_format, f"set{edge}Border")
+                brush_setter = getattr(cell_format, f"set{edge}BorderBrush")
+                setter(0.0 if side == "No borders" else width)
+                brush_setter(color)
+            cell.setFormat(cell_format)
+        self.status_message.emit(f"Updated borders for {len(cells)} cell(s).")
 
     def _table_toggle_header(self) -> None:
         table = self._current_table()
