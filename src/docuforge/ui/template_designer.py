@@ -152,10 +152,11 @@ class TemplateDesigner(QWidget):
         self.editor.imageDropped.connect(self._insert_image_path)
         self.editor.setAcceptRichText(True)
         self.editor.setObjectName("DocumentCanvas")
-        self.editor.setFixedWidth(794)
-        self.editor.setMinimumHeight(1123)
+        self.editor.setMinimumWidth(520)
+        self.editor.setMinimumHeight(735)
         self.editor.document().setPageSize(QSizeF(794, 1123))
         self.editor.document().setDocumentMargin(72)
+        self.page_scroll = page_scroll
         self.editor.setPlaceholderText(
             "Start designing your document here…\n\n"
             "Write anything, position the cursor wherever a value belongs, "
@@ -217,15 +218,49 @@ class TemplateDesigner(QWidget):
         self.editor.textChanged.connect(self._refresh_preview)
         self.editor.textChanged.connect(self._update_document_stats)
         self.setStyleSheet("""
-            #PageScroll { background:#E7EAF0; border:0; }
-            #DocumentCanvas { background:white; color:#20242B; border:1px solid #C9CDD4; padding:0; selection-background-color:#BBD7FF; }
-            QTabWidget::pane { border:1px solid #D8DDE6; background:#F8F9FB; }
-            QTabBar::tab { background:#ECEFF4; padding:9px 18px; margin-right:2px; border:0; }
-            QTabBar::tab:selected { background:#FFFFFF; border-bottom:2px solid #276EF1; font-weight:600; }
-            QToolBar { background:#FFFFFF; border:0; spacing:5px; padding:7px; }
-            QToolButton { padding:7px 10px; border-radius:5px; }
-            QToolButton:hover { background:#EAF1FC; }
+            QWidget { color: #E7EAF0; }
+            QLabel { color: #D7DBE3; }
+            #PageScroll { background: #30343B; border: 1px solid #3E444E; }
+            #DocumentCanvas { background: #FFFFFF; color: #20242B; border: 1px solid #C8CDD5; padding: 0; selection-background-color: #BBD7FF; }
+            QTabWidget { background: #25282E; }
+            QTabWidget::pane { background: #25282E; border: 1px solid #3D434D; border-top: 0; top: -1px; }
+            QTabBar { background: #25282E; }
+            QTabBar::tab { background: #30343C; color: #C9CED8; border: 1px solid #424955; border-bottom: 0; padding: 10px 17px; margin-right: 3px; min-width: 48px; }
+            QTabBar::tab:hover { background: #3A414C; color: #FFFFFF; }
+            QTabBar::tab:selected { background: #3B78F6; color: #FFFFFF; border-color: #3B78F6; font-weight: 700; }
+            QToolBar { background: #2B2F36; color: #F2F4F8; border: 0; spacing: 6px; padding: 8px; }
+            QToolButton { color: #E8EBF1; background: transparent; border: 1px solid transparent; border-radius: 5px; padding: 7px 10px; min-height: 22px; }
+            QToolButton:hover { background: #3A414C; border-color: #505967; }
+            QToolButton:pressed, QToolButton:checked { background: #244A87; border-color: #3978F6; }
+            QComboBox, QLineEdit, QSpinBox { color: #E8EBF1; background: #30343C; border: 1px solid #4A515D; border-radius: 5px; padding: 5px 8px; min-height: 22px; }
+            QPushButton { color: #E8EBF1; background: #30343C; border: 1px solid #4A515D; border-radius: 6px; padding: 7px 12px; }
+            QPushButton:hover { background: #3A414C; border-color: #648FE0; }
+            #PrimaryButton { background: #3978F6; color: white; border: 0; font-weight: 650; }
+            #PrimaryButton:hover { background: #2866E2; }
+            QListWidget, QTextBrowser { background: #22252B; color: #E8EBF1; border: 1px solid #3D434D; border-radius: 5px; }
+            QListWidget::item { padding: 8px 10px; border-bottom: 1px solid #363C45; }
+            QListWidget::item:selected { background: #244A87; color: white; }
+            QScrollBar:vertical, QScrollBar:horizontal { background: #25282E; border: 0; margin: 0; width: 12px; height: 12px; }
+            QScrollBar::handle:vertical, QScrollBar::handle:horizontal { background: #59616E; border-radius: 5px; min-height: 24px; min-width: 24px; }
+            QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
         """)
+        self._resize_page_canvas()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._resize_page_canvas()
+
+    def _resize_page_canvas(self) -> None:
+        """Fit the paper page to the available editor width while preserving A4 proportions."""
+        if not hasattr(self, "page_scroll") or not hasattr(self, "editor"):
+            return
+        available = max(520, self.page_scroll.viewport().width() - 48)
+        page_width = min(794, available)
+        page_height = round(page_width * 1.4142)
+        self.editor.setFixedWidth(page_width)
+        self.editor.setMinimumHeight(page_height)
+        self.editor.document().setPageSize(QSizeF(page_width, page_height))
+        self.editor.document().setDocumentMargin(round(page_width * 0.09))
 
     def _build_toolbar(self) -> None:
         for label, kind in (("B", "bold"), ("I", "italic"), ("U", "underline")):
