@@ -364,7 +364,7 @@ class TemplateDesigner(QWidget):
     def _build_data_ribbon(self) -> None:
         self._add_ribbon_tab("Data", [
             ("Insert data field", self._insert_selected_field),
-            ("Refresh source fields", self._load_selected_source),
+            ("Refresh source fields", self._load_columns),
             ("Refresh preview", self._refresh_preview),
         ])
 
@@ -614,7 +614,7 @@ class TemplateDesigner(QWidget):
             index = self.source_combo.findData(source_path)
             if index >= 0:
                 self.source_combo.setCurrentIndex(index)
-                self._load_selected_source()
+                self._on_source_changed()
                 sheet_index = self.sheet_combo.findText(payload.get("sheet", ""))
                 if sheet_index >= 0:
                     self.sheet_combo.setCurrentIndex(sheet_index)
