@@ -41,16 +41,17 @@ class FieldListWidget(QListWidget):
 class DropTextEdit(QTextEdit):
     """Rich-text editor accepting data-field drops from the field browser."""
     fieldDropped = Signal(str)
+    imageDropped = Signal(str)
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setAcceptDrops(True)
     def dragEnterEvent(self, event) -> None:
-        if event.mimeData().hasFormat("application/x-docuforge-field"):
+        if event.mimeData().hasFormat("application/x-docuforge-field") or event.mimeData().hasUrls():
             event.acceptProposedAction()
             return
         super().dragEnterEvent(event)
     def dragMoveEvent(self, event) -> None:
-        if event.mimeData().hasFormat("application/x-docuforge-field"):
+        if event.mimeData().hasFormat("application/x-docuforge-field") or event.mimeData().hasUrls():
             event.acceptProposedAction()
             return
         super().dragMoveEvent(event)
@@ -59,6 +60,13 @@ class DropTextEdit(QTextEdit):
             column = bytes(event.mimeData().data("application/x-docuforge-field")).decode("utf-8")
             self.setTextCursor(self.cursorForPosition(event.position().toPoint()))
             self.fieldDropped.emit(column)
+            event.acceptProposedAction()
+            return
+        if event.mimeData().hasUrls():
+            for url in event.mimeData().urls():
+                path = url.toLocalFile()
+                if path:
+                    self.imageDropped.emit(path)
             event.acceptProposedAction()
             return
         super().dropEvent(event)
@@ -133,6 +141,7 @@ class TemplateDesigner(QWidget):
         self._build_toolbar()
         self.ribbon.addTab(self.toolbar, "Home")
         self._build_insert_ribbon()
+        self._build_image_ribbon()
         self._build_table_ribbon()
         self._build_layout_ribbon()
         self._build_design_ribbon()
@@ -140,6 +149,7 @@ class TemplateDesigner(QWidget):
         self._build_view_ribbon()
         self.editor = DropTextEdit()
         self.editor.fieldDropped.connect(self._insert_field_by_name)
+        self.editor.imageDropped.connect(self._insert_image_path)
         self.editor.setAcceptRichText(True)
         self.editor.setObjectName("DocumentCanvas")
         self.editor.setFixedWidth(794)
@@ -206,7 +216,16 @@ class TemplateDesigner(QWidget):
         root.addLayout(bottom)
         self.editor.textChanged.connect(self._refresh_preview)
         self.editor.textChanged.connect(self._update_document_stats)
-        self.setStyleSheet("#PageScroll { background:#DDE2EA; } #DocumentCanvas { background:white; color:#20242B; border:1px solid #C9CDD4; padding:0; }")
+        self.setStyleSheet("""
+            #PageScroll { background:#E7EAF0; border:0; }
+            #DocumentCanvas { background:white; color:#20242B; border:1px solid #C9CDD4; padding:0; selection-background-color:#BBD7FF; }
+            QTabWidget::pane { border:1px solid #D8DDE6; background:#F8F9FB; }
+            QTabBar::tab { background:#ECEFF4; padding:9px 18px; margin-right:2px; border:0; }
+            QTabBar::tab:selected { background:#FFFFFF; border-bottom:2px solid #276EF1; font-weight:600; }
+            QToolBar { background:#FFFFFF; border:0; spacing:5px; padding:7px; }
+            QToolButton { padding:7px 10px; border-radius:5px; }
+            QToolButton:hover { background:#EAF1FC; }
+        """)
 
     def _build_toolbar(self) -> None:
         for label, kind in (("B", "bold"), ("I", "italic"), ("U", "underline")):
@@ -254,6 +273,82 @@ class TemplateDesigner(QWidget):
             ("Header marker", lambda: self._insert_marker("HEADER")),
             ("Footer marker", lambda: self._insert_marker("FOOTER")),
         ])
+
+    def _build_image_ribbon(self) -> None:
+        self._add_ribbon_tab("Picture", [
+            ("Insert picture", self._insert_picture),
+            ("Replace picture", self._replace_picture),
+            ("Resize picture", self._resize_picture),
+            ("Reset size", self._reset_picture_size),
+            ("Align left", lambda: self._align_picture(Qt.AlignmentFlag.AlignLeft)),
+            ("Align center", lambda: self._align_picture(Qt.AlignmentFlag.AlignHCenter)),
+            ("Align right", lambda: self._align_picture(Qt.AlignmentFlag.AlignRight)),
+            ("Remove picture", self._remove_picture),
+        ])
+
+    def _selected_image_format(self):
+        fmt = self.editor.textCursor().charFormat()
+        return fmt if fmt.isImageFormat() else None
+
+    def _insert_image_path(self, path: str) -> None:
+        image_path = Path(path)
+        if not image_path.is_file() or image_path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}:
+            self.status_message.emit("Drop a supported image file (PNG, JPG, BMP, GIF or WEBP).")
+            return
+        image = QTextImageFormat()
+        image.setName(str(image_path))
+        image.setWidth(320)
+        self.editor.textCursor().insertImage(image)
+        self.editor.setFocus()
+
+    def _replace_picture(self) -> None:
+        old = self._selected_image_format()
+        if old is None:
+            self.status_message.emit("Select an image in the document first.")
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "Replace picture", str(Path.home()), "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp)")
+        if path:
+            image = QTextImageFormat(old)
+            image.setName(path)
+            self.editor.textCursor().insertImage(image)
+
+    def _resize_picture(self) -> None:
+        old = self._selected_image_format()
+        if old is None:
+            self.status_message.emit("Select an image in the document first.")
+            return
+        width, ok = QInputDialog.getDouble(self, "Resize picture", "Width (pixels)", old.width() or 320, 16, 3000, 0)
+        if not ok:
+            return
+        height, ok = QInputDialog.getDouble(self, "Resize picture", "Height (pixels)", old.height() or width, 16, 3000, 0)
+        if not ok:
+            return
+        image = QTextImageFormat(old)
+        image.setWidth(width)
+        image.setHeight(height)
+        self.editor.textCursor().insertImage(image)
+
+    def _reset_picture_size(self) -> None:
+        old = self._selected_image_format()
+        if old is None:
+            self.status_message.emit("Select an image in the document first.")
+            return
+        image = QTextImageFormat(old)
+        image.setWidth(0)
+        image.setHeight(0)
+        self.editor.textCursor().insertImage(image)
+
+    def _align_picture(self, alignment: Qt.AlignmentFlag) -> None:
+        if self._selected_image_format() is None:
+            self.status_message.emit("Select an image in the document first.")
+            return
+        self.editor.setAlignment(alignment)
+
+    def _remove_picture(self) -> None:
+        if self._selected_image_format() is None:
+            self.status_message.emit("Select an image in the document first.")
+            return
+        self.editor.textCursor().deleteChar()
 
     def _build_table_ribbon(self) -> None:
         self._add_ribbon_tab("Table", [
@@ -388,10 +483,7 @@ class TemplateDesigner(QWidget):
     def _insert_picture(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Insert picture", str(Path.home()), "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp)")
         if path:
-            image = QTextImageFormat()
-            image.setName(path)
-            image.setWidth(320)
-            self.editor.textCursor().insertImage(image)
+            self._insert_image_path(path)
 
     def _insert_hyperlink(self) -> None:
         url, ok = QInputDialog.getText(self, "Insert hyperlink", "URL")
