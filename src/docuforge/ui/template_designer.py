@@ -95,7 +95,9 @@ class TemplateDesigner(QWidget):
         self.sheet_combo = QComboBox()
         self.sheet_combo.setMinimumWidth(140)
         self.refresh_button = QPushButton("Load fields")
-        self.refresh_button.clicked.connect(self._load_selected_source)
+        self.refresh_button.clicked.connect(self._load_columns)
+        self.source_combo.currentIndexChanged.connect(self._on_source_changed)
+        self.sheet_combo.currentIndexChanged.connect(self._load_columns)
         top.addWidget(self.template_title, 1)
         top.addWidget(QLabel("Data source"))
         top.addWidget(self.source_combo)
@@ -108,7 +110,7 @@ class TemplateDesigner(QWidget):
         left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.addWidget(QLabel("DATA FIELDS"))
+        left_layout.addWidget(QLabel("DATA FIELDS  ·  DRAG INTO DOCUMENT"))
         self.field_list = FieldListWidget()
         self.field_list.setDragEnabled(True)
         self.field_list.setToolTip("Double-click a field to insert it at the document cursor.")
@@ -123,7 +125,7 @@ class TemplateDesigner(QWidget):
         center = QWidget()
         center_layout = QVBoxLayout(center)
         center_layout.setContentsMargins(0, 0, 0, 0)
-        center_layout.addWidget(QLabel("DOCUMENT EDITOR"))
+        center_layout.addWidget(QLabel("DOCUMENT EDITOR  ·  TABLE TOOLS IN TABLE TAB"))
         self.ribbon = QTabWidget()
         self.ribbon.setDocumentMode(True)
         self.toolbar = QToolBar("Home")
@@ -131,6 +133,7 @@ class TemplateDesigner(QWidget):
         self._build_toolbar()
         self.ribbon.addTab(self.toolbar, "Home")
         self._build_insert_ribbon()
+        self._build_table_ribbon()
         self._build_layout_ribbon()
         self._build_design_ribbon()
         self._build_data_ribbon()
@@ -251,6 +254,94 @@ class TemplateDesigner(QWidget):
             ("Header marker", lambda: self._insert_marker("HEADER")),
             ("Footer marker", lambda: self._insert_marker("FOOTER")),
         ])
+
+    def _build_table_ribbon(self) -> None:
+        self._add_ribbon_tab("Table", [
+            ("Insert table", self._insert_table),
+            ("Add row above", lambda: self._table_insert_row(False)),
+            ("Add row below", lambda: self._table_insert_row(True)),
+            ("Delete row", self._table_delete_row),
+            ("Add column left", lambda: self._table_insert_column(False)),
+            ("Add column right", lambda: self._table_insert_column(True)),
+            ("Delete column", self._table_delete_column),
+            ("Merge cells", self._table_merge_cells),
+            ("Split cell", self._table_split_cell),
+            ("Cell shading", self._table_cell_shading),
+            ("Table borders", self._table_borders),
+        ])
+
+    def _current_table(self):
+        return self.editor.textCursor().currentTable()
+
+    def _table_insert_row(self, below: bool) -> None:
+        table = self._current_table()
+        if table is None:
+            self.status_message.emit("Place the cursor inside a table first.")
+            return
+        cell = table.cellAt(self.editor.textCursor())
+        table.insertRows(cell.row() + (1 if below else 0), 1)
+
+    def _table_delete_row(self) -> None:
+        table = self._current_table()
+        if table is None: return
+        cell = table.cellAt(self.editor.textCursor())
+        if table.rows() > 1: table.removeRows(cell.row(), 1)
+
+    def _table_insert_column(self, right: bool) -> None:
+        table = self._current_table()
+        if table is None: return
+        cell = table.cellAt(self.editor.textCursor())
+        table.insertColumns(cell.column() + (1 if right else 0), 1)
+
+    def _table_delete_column(self) -> None:
+        table = self._current_table()
+        if table is None: return
+        cell = table.cellAt(self.editor.textCursor())
+        if table.columns() > 1: table.removeColumns(cell.column(), 1)
+
+    def _table_merge_cells(self) -> None:
+        table = self._current_table()
+        cursor = self.editor.textCursor()
+        if table is None or not cursor.hasSelection():
+            self.status_message.emit("Select multiple adjacent table cells first.")
+            return
+        first = table.cellAt(cursor.selectionStart())
+        last = table.cellAt(max(cursor.selectionStart(), cursor.selectionEnd() - 1))
+        if first.isValid() and last.isValid():
+            top, left = min(first.row(), last.row()), min(first.column(), last.column())
+            bottom, right = max(first.row(), last.row()), max(first.column(), last.column())
+            table.mergeCells(top, left, bottom - top + 1, right - left + 1)
+
+    def _table_split_cell(self) -> None:
+        table = self._current_table()
+        if table is None: return
+        rows, ok = QInputDialog.getInt(self, "Split cell", "Rows", 1, 1, 20)
+        if not ok: return
+        columns, ok = QInputDialog.getInt(self, "Split cell", "Columns", 2, 1, 20)
+        if ok:
+            cell = table.cellAt(self.editor.textCursor())
+            table.splitCell(cell.row(), cell.column(), rows, columns)
+
+    def _table_cell_shading(self) -> None:
+        from PySide6.QtWidgets import QColorDialog
+        table = self._current_table()
+        if table is None: return
+        color = QColorDialog.getColor(QColor("#E8F0FE"), self, "Choose cell color")
+        if color.isValid():
+            cell = table.cellAt(self.editor.textCursor())
+            fmt = cell.format()
+            fmt.setBackground(color)
+            cell.setFormat(fmt)
+
+    def _table_borders(self) -> None:
+        table = self._current_table()
+        if table is None: return
+        fmt = table.format()
+        fmt.setBorder(0.8)
+        fmt.setBorderBrush(QColor("#8993A4"))
+        fmt.setCellPadding(6)
+        fmt.setCellSpacing(0)
+        table.setFormat(fmt)
 
     def _build_layout_ribbon(self) -> None:
         self._add_ribbon_tab("Layout", [
@@ -379,13 +470,15 @@ class TemplateDesigner(QWidget):
             self.editor.mergeCurrentCharFormat(fmt)
 
     def _populate_sources(self) -> None:
+        self.source_combo.blockSignals(True)
         self.source_combo.clear()
         for source in self.registered_sources:
             path = Path(source)
             if path.exists() and path.suffix.lower() in {".xlsx", ".xlsm", ".ods", ".csv"}:
                 self.source_combo.addItem(path.name, str(path))
+        self.source_combo.blockSignals(False)
         if self.source_combo.count():
-            self._load_selected_source()
+            self._on_source_changed()
         else:
             self.field_list.clear()
             self.columns = []
@@ -397,7 +490,7 @@ class TemplateDesigner(QWidget):
         self.registered_sources = paths
         self._populate_sources()
 
-    def _load_selected_source(self) -> None:
+    def _on_source_changed(self, *_args: object) -> None:
         source = self.source_combo.currentData()
         if not source:
             QMessageBox.information(
@@ -407,8 +500,13 @@ class TemplateDesigner(QWidget):
         try:
             path = Path(str(source))
             sheets = list_sheets(path)
+            previous_sheet = self.sheet_combo.currentText()
+            self.sheet_combo.blockSignals(True)
             self.sheet_combo.clear()
             self.sheet_combo.addItems(sheets)
+            if previous_sheet in sheets:
+                self.sheet_combo.setCurrentText(previous_sheet)
+            self.sheet_combo.blockSignals(False)
             self.current_source_path = path
             self._load_columns()
         except Exception as exc:
