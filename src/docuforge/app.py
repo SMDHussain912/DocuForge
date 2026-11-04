@@ -244,7 +244,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._section_heading(
             "Templates",
-            "Create and edit native DocuForge templates, or register existing DOCX/ODT files for future import support.",
+            "Create native templates or open existing Word DOCX documents for editing.",
         ))
         self.template_list = QListWidget()
         self.template_list.setObjectName("FileList")
@@ -468,10 +468,10 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Select a template", "Choose a registered template first.")
             return
         path = Path(str(item.data(Qt.ItemDataRole.UserRole)))
-        if path.suffix.lower() != ".dfgtpl":
+        if path.suffix.lower() not in {".dfgtpl", ".docx"}:
             QMessageBox.information(
-                self, "Import not available",
-                "Direct editing is currently supported for native .dfgtpl files. DOCX/ODT import is a later milestone.",
+                self, "Format not supported",
+                "DocuForge can currently edit native .dfgtpl and Microsoft Word .docx files.",
             )
             return
         self.navigate("Template Designer")

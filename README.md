@@ -17,7 +17,7 @@ The desktop workspace includes a Word-style rich-text document editor with ribbo
 - Connect XLSX/XLSM/CSV data and insert mapped fields with a live sample preview.
 - Save and reopen native `.dfgtpl` templates.
 
-The editor currently uses Qt rich-text as its editing surface. A dedicated pagination/rendering engine and DOCX/ODT import/export remain future work.
+The editor uses Qt rich-text as its editing surface. DOCX files can be opened and exported; conversion currently targets common paragraphs, run formatting, tables and inline pictures. Complex Word features may be simplified. A dedicated pagination/rendering engine and ODT import/export remain future work.
 
 ## Planned capabilities
 

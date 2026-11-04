@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from docuforge.templates.spreadsheet import list_sheets, read_columns_and_sample
+from docuforge.templates.docx_io import import_docx, export_docx
 from docuforge.templates.template_file import load_template, save_template
 
 _FIELD_TOKEN = re.compile(r"⟦DFG:([0-9a-f-]{36})⟧")
@@ -143,6 +144,8 @@ class TemplateDesigner(QWidget):
         open_button.clicked.connect(self.open_template)
         save_as_button = QPushButton("Save as…")
         save_as_button.clicked.connect(self.save_template_as)
+        export_button = QPushButton("Export DOCX…")
+        export_button.clicked.connect(self.export_docx_as)
         save_button = QPushButton("Save")
         save_button.setObjectName("PrimaryButton")
         save_button.clicked.connect(self.save_template)
@@ -150,6 +153,7 @@ class TemplateDesigner(QWidget):
         bottom.addWidget(open_button)
         bottom.addStretch()
         bottom.addWidget(save_as_button)
+        bottom.addWidget(export_button)
         bottom.addWidget(save_button)
         root.addLayout(bottom)
         self.editor.textChanged.connect(self._refresh_preview)
@@ -442,14 +446,17 @@ class TemplateDesigner(QWidget):
     def open_template(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, "Open DocuForge template", str(Path.home()),
-            "DocuForge templates (*.dfgtpl)",
+            "Documents (*.dfgtpl *.docx);;DocuForge templates (*.dfgtpl);;Word documents (*.docx)",
         )
         if path:
             self.open_template_path(Path(path))
 
     def open_template_path(self, path: Path) -> None:
         try:
-            payload = load_template(path)
+            if path.suffix.lower() == ".docx":
+                payload = {"html": import_docx(path), "fields": {}, "title": path.stem, "data_source": "", "sheet": ""}
+            else:
+                payload = load_template(path)
             self._loading = True
             self.editor.setHtml(payload["html"])
             self.fields = dict(payload.get("fields", {}))
@@ -484,12 +491,27 @@ class TemplateDesigner(QWidget):
         )
         if path:
             target = Path(path)
-            if target.suffix.lower() != ".dfgtpl":
+            if target.suffix.lower() not in {".dfgtpl", ".docx"}:
                 target = target.with_suffix(".dfgtpl")
+            self._save_to_path(target)
+
+    def export_docx_as(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(self, "Export Word document", str(Path.home() / "Untitled.docx"), "Word documents (*.docx)")
+        if path:
+            target = Path(path)
+            if target.suffix.lower() != ".docx":
+                target = target.with_suffix(".docx")
             self._save_to_path(target)
 
     def _save_to_path(self, path: Path) -> None:
         try:
+            if path.suffix.lower() == ".docx":
+                export_docx(self.editor.toHtml(), path, path.stem)
+                self.current_template_path = path
+                self.template_title.setText(path.stem)
+                self.status_message.emit(f"Exported Word document: {path.name}")
+                QMessageBox.information(self, "DOCX exported", f"Saved Word document to {path}")
+                return
             source = str(self.current_source_path) if self.current_source_path else ""
             save_template(
                 path,
