@@ -14,7 +14,9 @@ from docuforge.document.model import (
     TextRun,
     document_from_dict,
 )
-from docuforge.document.session import EditorSession, InsertParagraph, InsertText
+from docuforge.document.session import (
+    EditorSession, InsertInlineField, InsertParagraph, InsertText, RemoveInlineNode,
+)
 
 
 def test_document_round_trip_preserves_typed_dynamic_field() -> None:
