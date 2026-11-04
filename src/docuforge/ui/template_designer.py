@@ -156,7 +156,6 @@ class TemplateDesigner(QWidget):
         self.editor.setMinimumHeight(735)
         self.editor.document().setPageSize(QSizeF(794, 1123))
         self.editor.document().setDocumentMargin(72)
-        self.page_scroll = page_scroll
         self.editor.setPlaceholderText(
             "Start designing your document here…\n\n"
             "Write anything, position the cursor wherever a value belongs, "
@@ -167,6 +166,7 @@ class TemplateDesigner(QWidget):
         page_scroll.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         page_scroll.setObjectName("PageScroll")
         page_scroll.setWidget(self.editor)
+        self.page_scroll = page_scroll
         center_layout.addWidget(self.ribbon)
         center_layout.addWidget(page_scroll, 1)
 
