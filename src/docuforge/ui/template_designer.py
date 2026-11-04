@@ -246,7 +246,9 @@ class TemplateDesigner(QWidget):
         if item is None:
             return
         field_name = item.text()
-        self.editor.textCursor().insertText("{{ " + field_name + " }}")
+        cursor = self.editor.textCursor()
+        cursor.insertText("{{ " + field_name + " }}")
+        self.editor.setTextCursor(cursor)
         self.editor.setFocus()
 
     def _render_preview_html(self) -> str:
