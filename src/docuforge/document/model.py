@@ -59,7 +59,7 @@ class Paragraph:
 
 @dataclass(slots=True)
 class TableCell:
-    blocks: list[Paragraph | "Table"] = field(default_factory=list)
+    blocks: list[BlockNode] = field(default_factory=list)
     width_pt: float | None = None
     vertical_alignment: str = "middle"
     padding_pt: float = 4

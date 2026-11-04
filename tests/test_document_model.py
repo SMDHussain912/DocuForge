@@ -78,3 +78,35 @@ def test_editor_session_insert_undo_redo() -> None:
 def test_unsupported_schema_is_rejected() -> None:
     with pytest.raises(ValueError, match="Unsupported document schema"):
         document_from_dict({"schema_version": 99})
+
+
+def test_insert_field_at_middle_of_text_run_preserves_surrounding_text() -> None:
+    session = EditorSession()
+    session.execute(InsertParagraph(0, 0, Paragraph(runs=[TextRun("Dear employee!")])) )
+    field = DynamicField("source-1", "sheet-1", "employee-name", "Employee Name")
+    session.execute(InsertInlineField(0, 0, 0, 5, field))
+    runs = session.document.sections[0].blocks[0].runs
+    assert [type(run) for run in runs] == [TextRun, DynamicField, TextRun]
+    assert runs[0].text == "Dear "
+    assert runs[1].column_id == "employee-name"
+    assert runs[2].text == "employee!"
+
+
+def test_inline_field_insert_supports_undo_and_redo() -> None:
+    session = EditorSession()
+    session.execute(InsertParagraph(0, 0, Paragraph(runs=[TextRun("Name: ")])))
+    field = DynamicField("source-1", "sheet-1", "name", "Name")
+    session.execute(InsertInlineField(0, 0, 1, 0, field))
+    assert isinstance(session.document.sections[0].blocks[0].runs[1], DynamicField)
+    assert session.undo()
+    assert len(session.document.sections[0].blocks[0].runs) == 1
+    assert session.redo()
+    assert isinstance(session.document.sections[0].blocks[0].runs[1], DynamicField)
+
+
+def test_remove_inline_node() -> None:
+    session = EditorSession()
+    field = DynamicField("source-1", "sheet-1", "name", "Name")
+    session.execute(InsertParagraph(0, 0, Paragraph(runs=[TextRun("Name: "), field])))
+    session.execute(RemoveInlineNode(0, 0, 1))
+    assert len(session.document.sections[0].blocks[0].runs) == 1
